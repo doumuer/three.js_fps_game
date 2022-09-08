@@ -4,7 +4,7 @@
 		<title>three.js - misc - octree collisions</title>
 		<meta charset=utf-8 />
 		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
-		<link type="text/css" rel="stylesheet" href="../three.js-r141/examples/main.css">
+		<link type="text/css" rel="stylesheet" href="./examples/main.css">
 		<style>
 			.bloodBack{
 				width:100px;
@@ -84,7 +84,7 @@
 		<script type="importmap">
 			{
 				"imports": {
-					"three": "../three.js-r141/build/three.module.js"
+					"three": "./build/three.module.js"
 				}
 			}
 		</script>
@@ -116,16 +116,16 @@
 
 			import * as THREE from 'three';
 
-			import Stats from '../three.js-r141/examples/jsm/libs/stats.module.js';
+			import Stats from './examples/jsm/libs/stats.module.js';
 
-			import { GLTFLoader } from '../three.js-r141/examples/jsm/loaders/GLTFLoader.js';
+			import { GLTFLoader } from './examples/jsm/loaders/GLTFLoader.js';
 
-			import { Octree } from '../three.js-r141/examples/jsm/math/Octree.js';
-			import { OctreeHelper } from '../three.js-r141/examples/jsm/helpers/OctreeHelper.js';
+			import { Octree } from './examples/jsm/math/Octree.js';
+			import { OctreeHelper } from './examples/jsm/helpers/OctreeHelper.js';
 
-			import { Capsule } from '../three.js-r141/examples/jsm/math/Capsule.js';
+			import { Capsule } from './examples/jsm/math/Capsule.js';
 
-			import { GUI } from '../three.js-r141/examples/jsm/libs/lil-gui.module.min.js';
+			import { GUI } from './examples/jsm/libs/lil-gui.module.min.js';
 			//时间添加
 			const clock = new THREE.Clock();
 			// 场景创建
@@ -602,7 +602,7 @@
                 }
             }
             let local_name;
-			const loader = new GLTFLoader().setPath( '../three.js-r141/examples/models/gltf/' );
+			const loader = new GLTFLoader().setPath( './examples/models/gltf/' );
 			loader.load( 'collision-world.glb', ( gltf ) => {
 				scene.add( gltf.scene );
 				worldOctree.fromGraphNode( gltf.scene );
