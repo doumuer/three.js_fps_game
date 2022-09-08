@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<title>three.js - misc - octree collisions</title>
+		<meta charset=utf-8 />
+		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+		<link type="text/css" rel="stylesheet" href="../three.js-r141/examples/main.css">
+		<style>
+			.bloodBack{
+				width:100px;
+				height:30px;
+				background:rgb(66,66,66);
+				position:fixed;
+				top:52px;
+				left:5px;
+				z-index:999;
+			}
+			.blood{
+				height:30px;
+				background:rgb(177,17,22);
+			}
+			.opacity{
+				width:200px;
+				height:40px;
+				position:fixed;
+				top:55px;
+				right:15px;
+				overflow:hidden;
+				font-size:14px;
+			}
+			.opacity input{
+				display:block;
+				float:left;
+				width:160px;
+				height:40px;
+				border:none;
+				background:rgb(255,255,255);
+				color:rgb(66,66,66);
+				padding:0;
+				margin:0;
+			}
+			.opacity button{
+				display:block;
+				float:left;
+				width:40px;
+				height:40px;
+				border:none;
+				background:rgb(66,66,66);
+				color:rgb(255,255,255);
+				padding:0;
+				margin:0;
+			}
+			.point{
+				width:60px;
+				height:60px;
+				position:fixed;
+				top:50%;
+				left:50%;
+				transform: translate(-50%,-50%);
+				-ms-transform:translate(-50%,-50%);
+				-moz-transform:translate(-50%,-50%);
+				-webkit-transform:translate(-50%,-50%);
+				-o-transform:translate(-50%,-50%);
+			}
+			.point img{
+				display:block;
+				width:60px;
+				height:60px;
+			}
+		</style>
+	</head>
+	<body>
+		<div id="info">
+			Octree threejs demo - basic collisions with static triangle mesh<br />
+			MOUSE to look around and to throw balls<br/>
+			WASD to move and SPACE to jump
+		</div>
+		<div id="container"></div>
+
+		<!-- Import maps polyfill -->
+		<!-- Remove this when import maps will be widely supported -->
+		<script async src="https://unpkg.com/es-module-shims@1.3.6/dist/es-module-shims.js"></script>
+
+		<script type="importmap">
+			{
+				"imports": {
+					"three": "../three.js-r141/build/three.module.js"
+				}
+			}
+		</script>
+		
+		<div class="bloodBack"><div class="blood" id="blood"></div></div>
+		<div class="point"><img src="./point.png" alt="瞄准准心" id="point"/></div>
+		<div class="opacity"><input type="text" name="opacityValue" id="opacityValue" value="请填写0-100间的整数" /><button type="button" onclick="setPoint()">修改</button></div>
+
+		<script>
+			function setPoint(){
+				let newOpacity = document.getElementById("opacityValue").value;
+				if (!(/(^[1-9]\d*$)/.test(newOpacity))) {
+					return false;
+				}else{
+					if(newOpacity>=0 && newOpacity<101){
+						if(newOpacity == 0){
+							document.getElementById("point").style.opacity='0'; 
+						}else{
+							document.getElementById("point").style.opacity=newOpacity/100; 
+						}
+						
+					}else{
+						return false;
+					}
+				}
+			}
+		</script>
+		<script type="module">
+
+			import * as THREE from 'three';
+
+			import Stats from '../three.js-r141/examples/jsm/libs/stats.module.js';
+
+			import { GLTFLoader } from '../three.js-r141/examples/jsm/loaders/GLTFLoader.js';
+
+			import { Octree } from '../three.js-r141/examples/jsm/math/Octree.js';
+			import { OctreeHelper } from '../three.js-r141/examples/jsm/helpers/OctreeHelper.js';
+
+			import { Capsule } from '../three.js-r141/examples/jsm/math/Capsule.js';
+
+			import { GUI } from '../three.js-r141/examples/jsm/libs/lil-gui.module.min.js';
+			//时间添加
+			const clock = new THREE.Clock();
+			// 场景创建
+			const scene = new THREE.Scene();
+			scene.background = new THREE.Color( 0x88ccee );
+			// 视野能见度，添加雾
+			scene.fog = new THREE.Fog( 0x88ccee, 0, 50 );
+
+			const camera = new THREE.PerspectiveCamera( 70, window.innerWidth / window.innerHeight, 0.1, 1000 );
+			camera.rotation.order = 'YXZ';
+
+			//添加坐标轴辅助器
+			const axesHelper = new THREE.AxesHelper(5);
+			scene.add(axesHelper);
+
+			const fillLight1 = new THREE.HemisphereLight( 0x4488bb, 0x002244, 0.5 );
+			fillLight1.position.set( 2, 1, 1 );
+			scene.add( fillLight1 );
+
+			const directionalLight = new THREE.DirectionalLight( 0xffffff, 0.8 );
+			directionalLight.position.set( - 5, 25, - 1 );
+			directionalLight.castShadow = true;
+			directionalLight.shadow.camera.near = 0.01;
+			directionalLight.shadow.camera.far = 500;
+			directionalLight.shadow.camera.right = 30;
+			directionalLight.shadow.camera.left = - 30;
+			directionalLight.shadow.camera.top	= 30;
+			directionalLight.shadow.camera.bottom = - 30;
+			directionalLight.shadow.mapSize.width = 1024;
+			directionalLight.shadow.mapSize.height = 1024;
+			directionalLight.shadow.radius = 4;
+			directionalLight.shadow.bias = - 0.00006;
+			scene.add( directionalLight );
+
+			const container = document.getElementById( 'container' );
+
+			const renderer = new THREE.WebGLRenderer( { antialias: true } );
+			renderer.setPixelRatio( window.devicePixelRatio );
+			renderer.setSize( window.innerWidth, window.innerHeight );
+			// 添加阴影贴图
+			renderer.shadowMap.enabled = true;
+			// 定义阴影贴图类型
+			renderer.shadowMap.type = THREE.VSMShadowMap;
+			// 定义渲染器的输出编码
+			renderer.outputEncoding = THREE.sRGBEncoding;
+			renderer.toneMapping = THREE.ACESFilmicToneMapping;
+			container.appendChild( renderer.domElement );
+
+			const stats = new Stats();
+			stats.domElement.style.position = 'absolute';
+			stats.domElement.style.top = '0px';
+			container.appendChild( stats.domElement );
+
+			const GRAVITY = 10;
+
+			const NUM_SPHERES = 100;
+			const SPHERE_RADIUS = 0.2;
+
+			const STEPS_PER_FRAME = 5;
+			// 二十面多边形
+			const sphereGeometry = new THREE.IcosahedronGeometry( SPHERE_RADIUS, 5 );
+			const sphereMaterial = new THREE.MeshLambertMaterial( { color: 0xbbbb44 } );
+
+			const spheres = [];
+            const OtherSpheres = [];
+			let sphereIdx = 0;
+			let hit_count = 0;
+			let local_score = 0;
+
+			// 数字选项
+			// 1.创建方块判断flag
+			let is_create_terrain = false,map_current_box,is_input_map_box = true;
+
+
+			const worldOctree = new Octree();
+			const playerCollider = new Capsule( new THREE.Vector3( 0, 0.35, 0 ), new THREE.Vector3( 0, 1, 0 ), 0.35 );
+            //添加本体矩形体
+			const BoxGeometry = new THREE.BoxGeometry(0.35,1.35,0.35);
+            const local_Box = new THREE.Mesh( BoxGeometry, new THREE.MeshLambertMaterial( { color: 0x202020 } ) );
+            // 对象是否被渲染到阴影贴图中
+            local_Box.castShadow = true;
+            // 材质是否接收阴影，在阴影中才是是否接收
+            local_Box.receiveShadow = true;
+            scene.add( local_Box );
+            
+            
+			const playerVelocity = new THREE.Vector3();
+			const playerDirection = new THREE.Vector3();
+
+			let playerOnFloor = false;
+			let playerOnOther = false
+			let mouseTime = 0;
+
+			const keyStates = {};
+
+			const vector1 = new THREE.Vector3();
+			const vector2 = new THREE.Vector3();
+			const vector3 = new THREE.Vector3();
+
+			document.addEventListener( 'keydown', ( event ) => {
+				keyStates[ event.code ] = true;
+			} );
+			document.addEventListener( 'keypress', ( event ) => {
+				if(event.keyCode == 102){
+					if(socket_flag){
+						let buf_str = '{"skills":{"center_x":"'+local_Box.position.x+'","center_y":'+local_Box.position.y+
+						',"center_z":'+local_Box.position.z+',"force":'+100+'}}';
+						websocket.send(buf_str);
+                	}
+				}
+			} );
+
+			document.addEventListener( 'keyup', ( event ) => {
+				keyStates[ event.code ] = false;
+				if(event.code == 'Digit1'){
+					if(is_create_terrain){
+						is_create_terrain = false;
+						scene.remove(map_current_box);
+					}else{
+						is_create_terrain = true;
+						addMapBox();
+					}
+				}
+			} );
+
+			container.addEventListener( 'mousedown', () => {
+				// 指针锁定(以前叫做鼠标锁定) 是一种输入方法，这种方法是基于指针的相对位移
+				document.body.requestPointerLock();
+				mouseTime = performance.now();
+			} );
+
+			let map_box_arr = [];
+			document.addEventListener( 'mouseup', (e) => {
+				// 判断是否有被锁住的元素，上面就有body
+				if ( document.pointerLockElement !== null && e.button == 0 ){
+					// throwBall ();
+					// randomGift();
+					if(is_create_terrain){
+						if(is_input_map_box){
+							map_current_box.material.opacity = 1;
+							map_box_arr.push(map_current_box);
+							is_impact_arr = new Array(map_box_arr.length);
+							addMapBox();
+						}
+					}
+					
+				}
+			} );
+
+			document.body.addEventListener( 'mousemove', ( event ) => {
+				if ( document.pointerLockElement === document.body ) {
+					// 根据鼠标移动，旋转摄像机，鼠标中x移动对应的是在3d模型中y轴旋转
+					camera.rotation.y -= event.movementX / 500;
+					camera.rotation.x -= event.movementY / 500;
+				}
+			} );
+			// 窗口大小变化画布中内容也发生相应变化
+			window.addEventListener( 'resize', onWindowResize );
+
+			function onWindowResize() {
+
+				camera.aspect = window.innerWidth / window.innerHeight;
+				camera.updateProjectionMatrix();
+
+				renderer.setSize( window.innerWidth, window.innerHeight );
+
+			}
+
+			function throwBall() {
+
+                const sphere = new THREE.Mesh( sphereGeometry, sphereMaterial );
+                // 对象是否被渲染到阴影贴图中
+                sphere.castShadow = true;
+                // 材质是否接收阴影，在阴影中才是是否接收
+                sphere.receiveShadow = true;
+                scene.add( sphere );
+				// const sphere = spheres[ sphereIdx ];
+				// 获取当前摄像机3d中向量
+                let center_sphere = {};
+                center_sphere['mesh'] = sphere;
+				camera.getWorldDirection( playerDirection );
+				center_sphere['collider'] = new THREE.Sphere( new THREE.Vector3().copy( playerCollider.end ).addScaledVector( playerDirection, playerCollider.radius * 1.5 ), SPHERE_RADIUS );
+                
+				// throw the ball with more force if we hold the button longer, and if we move forward
+				const impulse = 5 + 30 * ( 1 - Math.exp( ( mouseTime - performance.now() ) * 0.001 ) );
+				
+                center_sphere['velocity'] = new THREE.Vector3().copy( playerDirection ).multiplyScalar( impulse );
+                center_sphere['velocity'].addScaledVector( playerVelocity, 2 );
+				center_sphere['name'] = local_name;
+				// sphereIdx = ( sphereIdx + 1 ) % spheres.length;
+                OtherSpheres.push(center_sphere);
+                if(socket_flag){
+                    let buf_str = '{"throwBall":{"name":"'+local_name+'","x":'+center_sphere.collider.center.x+
+                    ',"y":'+center_sphere.collider.center.y+
+                    ',"z":'+center_sphere.collider.center.z+',"vct_x":'+center_sphere.velocity.x+',"vct_y":'+
+                    center_sphere.velocity.y+',"vct_z":'+center_sphere.velocity.z+ '}}';
+                    websocket.send(buf_str);
+                }
+			}
+
+			function playerCollisions() {
+				const result = worldOctree.capsuleIntersect( playerCollider );
+				playerOnFloor = false;
+				if ( result ) {
+					playerOnFloor = result.normal.y > 0;
+					if ( ! playerOnFloor ) {
+						playerVelocity.addScaledVector( result.normal, - result.normal.dot( playerVelocity ) );
+					}
+					playerCollider.translate( result.normal.multiplyScalar( result.depth ) );
+				}
+			}
+			let prev_vel_y=0,prev_map_box_y=0;
+			let is_impact_arr = [];
+			function updatePlayer( deltaTime ) {
+				let damping = Math.exp( - 4 * deltaTime ) - 1;
+				if ( ! playerOnFloor && !playerOnOther && (is_impact_arr.indexOf(true) == -1)) {
+					playerVelocity.y -= 30 * deltaTime;
+					// small air resistance
+					damping *= 0.1;
+				}
+				
+				playerVelocity.addScaledVector( playerVelocity, damping );
+				for(var o in all_player_json){
+					if(Math.abs(local_Box.position.y-all_player_json[o]['mesh'].position.y)<1.5){
+						if(Math.abs(local_Box.position.z - all_player_json[o]['mesh'].position.z)<0.35
+						&& Math.abs(local_Box.position.x - all_player_json[o]['mesh'].position.x)<0.35){
+							if(prev_vel_y>1.35){
+								if(!playerOnOther){
+									playerVelocity.y = 0;
+								}
+								playerOnOther = true;
+							}else{
+								const removal_y = new THREE.Vector3(playerVelocity.x,0,playerVelocity.z);
+								const other_vel = vector1.subVectors( all_player_json[o]['mesh'].position, local_Box.position );
+								const new_removal_y = removal_y.normalize().sub(other_vel).multiplyScalar(0.5);
+								playerVelocity.x = new_removal_y.x;
+								playerVelocity.z = new_removal_y.z;
+							}
+						}
+					}else{
+						playerOnOther = false;
+					}
+					if(Math.abs(local_Box.position.z - all_player_json[o]['mesh'].position.z)<0.35
+					&& Math.abs(local_Box.position.x - all_player_json[o]['mesh'].position.x)<0.35){
+						prev_vel_y = Math.abs(local_Box.position.y-all_player_json[o]['mesh'].position.y);
+					}else{
+						playerOnOther = false;
+					}
+					
+				}
+				let map_box_len = map_box_arr.length;
+				for(let i=0;i<map_box_len;i++){
+					if(Math.abs(local_Box.position.y-map_box_arr[i].position.y) < 1.2){
+						if(Math.abs(local_Box.position.z - map_box_arr[i].position.z)<0.675
+						&& Math.abs(local_Box.position.x - map_box_arr[i].position.x)<0.675){
+							if(prev_map_box_y>1.175){
+								if(!is_impact_arr[i]){
+									playerVelocity.y = 0;
+								}
+								is_impact_arr[i] = true;
+							}else{
+								const removal_y = new THREE.Vector3(playerVelocity.x,0,playerVelocity.z);
+								const other_vel = vector1.subVectors( map_box_arr[i].position, local_Box.position );
+								const new_removal_y = removal_y.normalize().sub(other_vel).multiplyScalar(0.5);
+								playerVelocity.x = new_removal_y.x;
+								playerVelocity.z = new_removal_y.z;
+							}
+						}
+					}else{
+						is_impact_arr[i] = false;
+					}
+					if(Math.abs(local_Box.position.z - map_box_arr[i].position.z)<0.675
+					&& Math.abs(local_Box.position.x - map_box_arr[i].position.x)<0.675){
+						prev_map_box_y = Math.abs(local_Box.position.y-map_box_arr[i].position.y);
+					}else{
+						is_impact_arr[i] = false;
+					}
+				}
+				
+				const deltaPosition = playerVelocity.clone().multiplyScalar( deltaTime );
+				playerCollider.translate( deltaPosition );
+				playerCollisions();
+				
+				camera.position.copy( playerCollider.end );
+                local_Box.position.set(camera.position.x,camera.position.y-0.325,camera.position.z);
+				
+			}
+
+			let bloodWidth=10;
+			function playerSphereCollision( sphere ) {
+				const center = vector1.addVectors( playerCollider.start, playerCollider.end ).multiplyScalar( 0.5 );
+				const sphere_center = sphere.collider.center;
+				const r = playerCollider.radius + sphere.collider.radius;
+				const r2 = r * r;
+				// approximation: player = 3 spheres
+				for ( const point of [ playerCollider.start, playerCollider.end, center ] ) {
+					const d2 = point.distanceToSquared( sphere_center );
+					if ( d2 < r2 ) {
+						const normal = vector1.subVectors( point, sphere_center ).normalize();
+						const v1 = vector2.copy( normal ).multiplyScalar( normal.dot( playerVelocity ) );
+						const v2 = vector3.copy( normal ).multiplyScalar( normal.dot( sphere.velocity ) );
+						playerVelocity.add( v2 ).sub( v1 ).multiplyScalar(0.5);
+						// sphere.velocity.add( v1 ).sub( v2 );
+						// const d = ( r - Math.sqrt( d2 ) ) / 2;
+						// sphere_center.addScaledVector( normal, - d );
+						hit_count++;
+						if(socket_flag && sphere['name'] != local_name){
+							let buf_str = '{"Score":{"increase_name":"'+sphere['name']+'"}}';
+							websocket.send(buf_str);
+						}
+
+						
+						bloodWidth = (10 - hit_count)*10;
+						document.getElementById("blood").style.width = bloodWidth + 'px';
+						if(hit_count == 10){
+							hit_count = 0;
+							document.getElementById("blood").style.width = (10 - hit_count)*10 + 'px';
+							//Math.random()*(20+1)-10
+							playerCollider.start.set( 0, 0.35, 0 );
+							playerCollider.end.set( 0, 1, 0);
+							playerCollider.radius = 0.35;
+							camera.position.copy( playerCollider.end );
+							camera.rotation.set( 0, 0, 0 );
+							
+						}
+						scene.remove(sphere.mesh);
+                        OtherSpheres.remove(sphere);
+						
+					}
+				}
+			}
+
+			function spheresCollisions() {
+				const box = new THREE.Box3();
+				for ( let i = 0, length = OtherSpheres.length; i < length; i ++ ) {
+					const s1 = OtherSpheres[ i ];
+					for ( let j = i + 1; j < length; j ++ ) {
+						const s2 = OtherSpheres[ j ];
+						const d2 = s1.collider.center.distanceToSquared( s2.collider.center );
+						const r = s1.collider.radius + s2.collider.radius;
+						const r2 = r * r;
+						if ( d2 < r2 ) {
+							// const normal = vector1.subVectors( s1.collider.center, s2.collider.center ).normalize();
+							// const v1 = vector2.copy( normal ).multiplyScalar( normal.dot( s1.velocity ) );
+							// const v2 = vector3.copy( normal ).multiplyScalar( normal.dot( s2.velocity ) );
+							// s1.velocity.add( v2 ).sub( v1 );
+							// s2.velocity.add( v1 ).sub( v2 );
+							// const d = ( r - Math.sqrt( d2 ) ) / 2;
+							// s1.collider.center.addScaledVector( normal, d );
+							// s2.collider.center.addScaledVector( normal, - d );
+							scene.remove(OtherSpheres[ i ].mesh);
+							scene.remove(OtherSpheres[ j ].mesh);
+							OtherSpheres.remove(OtherSpheres[ i ]);
+                        	OtherSpheres.remove(OtherSpheres[ j-1 ]);
+							return;
+
+						}
+					}
+					
+					for(var o in all_player_json){
+						all_player_json[o]['mesh'].geometry.computeBoundingBox();
+						box.copy( all_player_json[o]['mesh'].geometry.boundingBox ).applyMatrix4( all_player_json[o]['mesh'].matrixWorld );
+						if(box.intersectsSphere(new THREE.Sphere(s1.mesh.position,0.2))){
+							scene.remove(OtherSpheres[ i ].mesh);
+							OtherSpheres.remove(OtherSpheres[ i ]);
+							return;
+						}
+					}
+				}
+			}
+
+            Array.prototype.remove = function(val) { 
+                var index = this.indexOf(val); 
+                if (index > -1) { 
+                	this.splice(index, 1); 
+                } 
+            };
+            function updateOtherSpheres(deltaTime){
+                OtherSpheres.forEach( sphere => {
+					sphere.collider.center.addScaledVector( sphere.velocity, deltaTime );
+					const result = worldOctree.sphereIntersect( sphere.collider );
+					if ( result ) {
+						scene.remove(sphere.mesh);
+                        OtherSpheres.remove(sphere);
+						// 小球碰撞反弹
+						// sphere.velocity.addScaledVector( result.normal, - result.normal.dot( sphere.velocity ) * 1.5 );
+						// sphere.collider.center.add( result.normal.multiplyScalar( result.depth ) );
+					} else {
+						sphere.velocity.y -= GRAVITY * deltaTime;
+					}
+					const damping = Math.exp( - 1.5 * deltaTime ) - 1;
+					sphere.velocity.addScaledVector( sphere.velocity, damping );
+					if(sphere.name != local_name){
+						playerSphereCollision( sphere );
+					}
+
+				} );
+				spheresCollisions();
+                
+				for ( const sphere of OtherSpheres ) {
+					sphere.mesh.position.copy( sphere.collider.center );
+				}
+            }
+            
+
+			function getForwardVector() {
+				camera.getWorldDirection( playerDirection );
+				playerDirection.y = 0;
+				playerDirection.normalize();
+				return playerDirection;
+			}
+
+			function getSideVector() {
+
+				camera.getWorldDirection( playerDirection );
+				playerDirection.y = 0;
+				playerDirection.normalize();
+				playerDirection.cross( camera.up );
+				return playerDirection;
+
+			}
+
+			function controls( deltaTime ) {
+				// gives a bit of air control
+				const speedDelta = deltaTime * ( playerOnFloor||playerOnOther||(is_impact_arr.indexOf(true) != -1) ? 25 : 8 );
+				if ( keyStates[ 'KeyW' ] ) {
+					playerVelocity.add( getForwardVector().multiplyScalar( speedDelta ) );
+				}
+				if ( keyStates[ 'KeyS' ] ) {
+					playerVelocity.add( getForwardVector().multiplyScalar( - speedDelta ) );
+				}
+				if ( keyStates[ 'KeyA' ] ) {
+					playerVelocity.add( getSideVector().multiplyScalar( - speedDelta ) );
+				}
+				if ( keyStates[ 'KeyD' ] ) {
+					playerVelocity.add( getSideVector().multiplyScalar( speedDelta ) );
+				}
+				
+				if ( playerOnFloor||playerOnOther||(is_impact_arr.indexOf(true) != -1) ) {
+					if ( keyStates[ 'Space' ] ) {
+						playerVelocity.y = 15;
+					}
+				}
+				if(is_create_terrain){
+					camera.getWorldDirection( playerDirection );
+					map_current_box.position.copy(camera.position.clone().addScaledVector( playerDirection, 2 ));
+				}
+			}
+
+			// 以点为中心扩散力
+			function swellingPower(center,force){
+				const direction = vector1.subVectors(  local_Box.position, center);
+				const len = direction.length();
+				let thrust = direction.multiplyScalar(1/Math.exp(len));
+				playerVelocity.addScaledVector(thrust,force);
+
+			}
+            // 生成随机id
+            function _getRandomString(len) {
+                len = len || 32;
+                var $chars = 'ABCDEFGHJKMNPQRSTWXYZabcdefhijkmnprstwxyz2345678'; // 默认去掉了容易混淆的字符oOLl,9gq,Vv,Uu,I1
+                var maxPos = $chars.length;
+                var pwd = '';
+                for (let i = 0; i < len; i++) {
+                    pwd += $chars.charAt(Math.floor(Math.random() * maxPos));
+                }
+                return pwd;
+            }
+            // id查重
+            function checkRepeatName(id_name){
+                if(all_player_json.hasOwnProperty(local_name)){
+                    local_name = _getRandomString(10) + Date.now();
+                    checkRepeatName(id_name);
+                }
+            }
+            let local_name;
+			const loader = new GLTFLoader().setPath( '../three.js-r141/examples/models/gltf/' );
+			loader.load( 'collision-world.glb', ( gltf ) => {
+				scene.add( gltf.scene );
+				worldOctree.fromGraphNode( gltf.scene );
+                local_name = _getRandomString(10);
+                checkRepeatName(local_name);
+				gltf.scene.traverse( child => {
+					if ( child.isMesh ) {
+						child.castShadow = true;
+						child.receiveShadow = true;
+						if ( child.material.map ) {
+							child.material.map.anisotropy = 4;
+						}
+					}
+				} );
+				const helper = new OctreeHelper( worldOctree );
+				helper.visible = false;
+				scene.add( helper );
+				const gui = new GUI( { width: 200 } );
+				gui.add( { debug: false }, 'debug' )
+					.onChange( function ( value ) {
+						helper.visible = value;
+					} );
+				animate();
+			} );
+
+			function teleportPlayerIfOob() {
+				if ( camera.position.y <= - 25 ) {
+					playerCollider.start.set( 0, 0.35, 0 );
+					playerCollider.end.set( 0, 1, 0 );
+					playerCollider.radius = 0.35;
+					camera.position.copy( playerCollider.end );
+					camera.rotation.set( 0, 0, 0 );
+				}
+			}
+
+            function inputModel(name){
+                const playerCollider = new Capsule( new THREE.Vector3( 0, 0.35, 0 ), new THREE.Vector3( 0, 1, 0 ), 0.35 );
+                all_player_json[name]['mesh'] = new THREE.Mesh( BoxGeometry, new THREE.MeshLambertMaterial( { color: 0x202020 } ) );
+                // 对象是否被渲染到阴影贴图中
+                all_player_json[name]['mesh'].castShadow = true;
+                // 材质是否接收阴影，在阴影中才是是否接收
+                all_player_json[name]['mesh'].receiveShadow = true;
+                scene.add( all_player_json[name]['mesh'] ); 
+            }
+
+			function addMapBox(){
+				camera.getWorldDirection( playerDirection );
+				let current_box_pos = new THREE.Vector3();
+				current_box_pos = camera.position.clone().addScaledVector( playerDirection, 2 );
+				
+				const map_box = new THREE.BoxGeometry(1,1,1);
+				map_current_box = new THREE.Mesh( map_box, new THREE.MeshBasicMaterial( { color: 0x7d1500 } ) );
+				scene.add(map_current_box);
+				map_current_box.material.transparent = true;
+				map_current_box.material.opacity = 0.5;
+				map_current_box.position.copy(current_box_pos);
+			}
+
+			let gift_arr = [];
+			function randomGift(){
+				let gift_info_json = {};
+
+				const gift = new THREE.Sphere(new THREE.Vector3(Math.random() * 32 - 14,10,Math.random() * 32 - 14),0.5);
+				gift_info_json['collider'] = gift;
+
+				const gift_box = new THREE.BoxGeometry(1,1,1);
+            	const gift_mesh = new THREE.Mesh( gift_box, new THREE.MeshLambertMaterial( { color: Math.random() * 0xffffff } ) );
+				gift_info_json['mesh'] = gift_mesh;
+				gift_info_json['velocity'] = new THREE.Vector3();
+				scene.add( gift_mesh );
+				console.log(gift.center);
+				// gift_info_json['mesh'].postion.copy(gift.center);
+				gift_arr.push(gift_info_json);
+				
+			}
+
+			function updateGift(deltaTime){
+				for ( const gift of gift_arr ) {
+					gift.collider.center.addScaledVector( gift.velocity, deltaTime );
+					const result = worldOctree.sphereIntersect( gift.collider );
+					if ( result ) {
+						gift.velocity.addScaledVector( result.normal, - result.normal.dot( gift.velocity ) * 1.5 );
+						gift.collider.center.add( result.normal.multiplyScalar( result.depth ) );
+					} else {
+						gift.velocity.y -= 5 * deltaTime;
+					}
+					gift.mesh.position.copy( gift.collider.center );
+					const damping = Math.exp( - 1.5 * deltaTime ) - 1;
+					gift.velocity.addScaledVector( gift.velocity, damping );
+
+					const box = new THREE.Box3();
+					gift.mesh.geometry.computeBoundingBox();
+					box.copy( gift.mesh.geometry.boundingBox ).applyMatrix4( gift.mesh.matrixWorld );
+					if(box.distanceToPoint(local_Box.position) == 0){
+						scene.remove(gift.mesh);
+                        gift_arr.remove(gift);
+					}
+				}
+				
+			}
+
+            
+			function animate() {
+				const deltaTime = Math.min( 0.05, clock.getDelta() ) / STEPS_PER_FRAME;
+				// we look for collisions in substeps to mitigate the risk of
+				// an object traversing another too quickly for detection.
+				for ( let i = 0; i < STEPS_PER_FRAME; i ++ ) {
+					controls( deltaTime );
+					updatePlayer( deltaTime );
+                    updateOtherSpheres( deltaTime );
+					updateGift(deltaTime);
+                    if(socket_flag){
+						let buf_str = '{"'+local_name+'":{"x":'+camera.position.x+',"y":'+camera.position.y+
+						',"z":'+camera.position.z+',"rotation":'+camera.rotation.y+'}}';
+						websocket.send(buf_str);
+					}
+					teleportPlayerIfOob();
+				}
+                for(var o in all_player_json){
+                    if(o != local_name && all_player_json[o]['mesh']){
+                        // console.log(all_player_json[o]['mesh'].position);
+                        all_player_json[o]['mesh'].rotation.y = all_player_json[o]['rotation'];
+                        all_player_json[o]['mesh'].position.set(all_player_json[o]['x'],all_player_json[o]['y'] - 0.325,all_player_json[o]['z']);
+                    }
+                }
+				renderer.render( scene, camera );
+				stats.update();
+				requestAnimationFrame( animate );
+			}
+
+            let all_player_json = {};
+            let socket_flag = false;
+            let websocket = new WebSocket("ws://192.168.2.173:9999");
+            websocket.onopen = function(evt) {
+                console.log("onopen",evt);
+                socket_flag = true;
+            };
+            websocket.onclose = function(evt) {
+                console.log("onclose",evt);
+                socket_flag = false;
+            };
+            websocket.onmessage = function(evt) {
+                let obj = JSON.parse(evt.data);
+                for(var o in obj){
+                    if(o == "throwBall"){
+                        const sphere = new THREE.Mesh( sphereGeometry, sphereMaterial );
+                        // 对象是否被渲染到阴影贴图中
+                        sphere.castShadow = true;
+                        // 材质是否接收阴影，在阴影中才是是否接收
+                        sphere.receiveShadow = true;
+                        scene.add( sphere );
+                        OtherSpheres.push( {
+							name: obj[o]['name'],
+                            mesh: sphere,
+                            // 构造的球体，center：向量，radius：半径
+                            collider: new THREE.Sphere( new THREE.Vector3( obj[o]['x'], obj[o]['y'], obj[o]['z'] ), SPHERE_RADIUS ),
+                            velocity: new THREE.Vector3(obj[o]['vct_x'],obj[o]['vct_y'],obj[o]['vct_z'])
+                        } );
+                        return;
+                    }else if(o == "Score"){
+						local_score += obj[o];
+						console.log(local_score);
+						return;
+					}else if(o == "skills"){
+						swellingPower(new THREE.Vector3(obj[o]['center_x'],obj[o]['center_y'],obj[o]['center_z']),obj[o]['force']);
+					}
+                    if(o == local_name){
+                        // console.log(obj[o]['x'],obj[o]['y'],obj[o]['z']);
+                    }else{
+                        if(!all_player_json.hasOwnProperty(o)){
+                            all_player_json[o] = {};
+                            all_player_json[o]['x'] = obj[o]['x'];
+                            all_player_json[o]['y'] = obj[o]['y'];
+                            all_player_json[o]['z'] = obj[o]['z'];
+                            inputModel(o);
+                        }else{
+                            all_player_json[o]['x'] = obj[o]['x'];
+                            all_player_json[o]['y'] = obj[o]['y'];
+                            all_player_json[o]['z'] = obj[o]['z'];
+                            all_player_json[o]['rotation'] = obj[o]['rotation'];
+                        }
+                    }
+                }
+                for(var o in all_player_json){ 
+                    if(!obj.hasOwnProperty(o)){
+                        scene.remove( all_player_json[o]['mesh'] );
+                        delete all_player_json[o];
+                    }
+                }
+            };
+            websocket.onerror = function(evt) {
+                console.log("onerror",evt);
+            };
+		</script>
+	</body>
+</html>
