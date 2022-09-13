@@ -337,11 +337,87 @@
 					playerCollider.translate( result.normal.multiplyScalar( result.depth ) );
 				}
 			}
+
+			function playerAddBricks(deltaTime){
+				let map_box_len = map_box_arr.length;
+				const box = new THREE.Box3();
+				let normal_vector = new THREE.Vector3();
+				is_box_onfloor = false;
+				let cos_theta,distance_boxcenter;
+				for(let i=0;i<map_box_len;i++){
+					map_box_arr[i].geometry.computeBoundingBox();
+					box.copy( map_box_arr[i].geometry.boundingBox ).applyMatrix4( map_box_arr[i].matrixWorld );
+					if(playerCollider.intersectsBox( box )){
+						// vector1.subVectors( map_box_arr[i].position, local_Box.position );
+						// playerVelocity.sub(vector1.normalize().multiplyScalar(0.5));
+
+						// vector2.copy(playerVelocity).sub(vector1);
+						// playerVelocity.add(vector2).multiplyScalar(0.2);
+						
+						if(local_Box.position.x<box.min.x-0.3){
+							normal_vector.set(1,0,0);
+						}
+						if(local_Box.position.z<box.min.z-0.3){
+							normal_vector.set(0,0,1);
+						}
+						if(local_Box.position.x>box.max.x+0.3){
+							normal_vector.set(-1,0,0);
+						}
+						if(local_Box.position.z>box.max.z+0.3){
+							normal_vector.set(0,0,-1);
+						}
+						
+						if(playerCollider.start.y - box.max.y>0){
+							//在方块内才不落下-------
+							
+							if(local_Box.position.x<box.max.x+0.32 && box.min.x-0.32<local_Box.position.x&&
+							local_Box.position.z<box.max.z+0.32 && box.min.z-0.32<local_Box.position.z){
+								if(playerVelocity.y<0){
+									playerVelocity.y = 0;
+								}
+
+								box.getCenter(vector1);
+								distance_boxcenter = Math.abs(local_Box.position.x - vector1.x) - 0.5;
+								if(distance_boxcenter>0){
+									vector2.set(0,box.max.y + Math.sqrt(0.35*0.35 - Math.pow(distance_boxcenter,2))-playerCollider.start.y,0);
+									playerCollider.translate( vector2 );
+									// playerCollider.start.y = box.max.y + Math.sqrt(0.35*0.35 - Math.pow(distance_boxcenter,2));
+								}
+								distance_boxcenter = Math.abs(local_Box.position.z - vector1.z) - 0.5;
+								if(distance_boxcenter>0){
+									vector2.set(0,box.max.y + Math.sqrt(0.35*0.35 - Math.pow(distance_boxcenter,2))-playerCollider.start.y,0);
+									console.log("222",playerCollider.start.y);
+									playerCollider.translate( vector2 );
+									// playerCollider.start.y = box.max.y + Math.sqrt(0.35*0.35 - Math.pow(distance_boxcenter,2));
+								}
+								
+								is_box_onfloor = true;
+
+							}
+
+							continue;
+						}
+						
+						if( box.min.y-playerCollider.end.y>0.3){
+							if(playerVelocity.y>0){
+								playerVelocity.y = 0;
+							}
+						}
+
+						cos_theta = playerVelocity.clone().normalize().dot(normal_vector);
+						if(cos_theta<0) continue;
+						playerVelocity.sub(normal_vector.multiplyScalar(playerVelocity.clone().length ()*cos_theta));
+						
+					}
+				}
+
+			}
 			let prev_vel_y=0,prev_map_box_y=0;
 			let is_impact_arr = [];
+			let is_box_onfloor = false;
 			function updatePlayer( deltaTime ) {
 				let damping = Math.exp( - 4 * deltaTime ) - 1;
-				if ( ! playerOnFloor && !playerOnOther && (is_impact_arr.indexOf(true) == -1)) {
+				if ( ! playerOnFloor && !playerOnOther && !is_box_onfloor) {
 					playerVelocity.y -= 30 * deltaTime;
 					// small air resistance
 					damping *= 0.1;
@@ -376,35 +452,7 @@
 					}
 					
 				}
-				let map_box_len = map_box_arr.length;
-				for(let i=0;i<map_box_len;i++){
-					if(Math.abs(local_Box.position.y-map_box_arr[i].position.y) < 1.2){
-						if(Math.abs(local_Box.position.z - map_box_arr[i].position.z)<0.675
-						&& Math.abs(local_Box.position.x - map_box_arr[i].position.x)<0.675){
-							if(prev_map_box_y>1.175){
-								if(!is_impact_arr[i]){
-									playerVelocity.y = 0;
-								}
-								is_impact_arr[i] = true;
-							}else{
-								const removal_y = new THREE.Vector3(playerVelocity.x,0,playerVelocity.z);
-								const other_vel = vector1.subVectors( map_box_arr[i].position, local_Box.position );
-								const new_removal_y = removal_y.normalize().sub(other_vel).multiplyScalar(0.5);
-								playerVelocity.x = new_removal_y.x;
-								playerVelocity.z = new_removal_y.z;
-							}
-						}
-					}else{
-						is_impact_arr[i] = false;
-					}
-					if(Math.abs(local_Box.position.z - map_box_arr[i].position.z)<0.675
-					&& Math.abs(local_Box.position.x - map_box_arr[i].position.x)<0.675){
-						prev_map_box_y = Math.abs(local_Box.position.y-map_box_arr[i].position.y);
-					}else{
-						is_impact_arr[i] = false;
-					}
-				}
-				
+				playerAddBricks(deltaTime);
 				const deltaPosition = playerVelocity.clone().multiplyScalar( deltaTime );
 				playerCollider.translate( deltaPosition );
 				playerCollisions();
@@ -550,7 +598,7 @@
 
 			function controls( deltaTime ) {
 				// gives a bit of air control
-				const speedDelta = deltaTime * ( playerOnFloor||playerOnOther||(is_impact_arr.indexOf(true) != -1) ? 25 : 8 );
+				const speedDelta = deltaTime * ( playerOnFloor||playerOnOther||is_box_onfloor ? 25 : 8 );
 				if ( keyStates[ 'KeyW' ] ) {
 					playerVelocity.add( getForwardVector().multiplyScalar( speedDelta ) );
 				}
@@ -564,7 +612,7 @@
 					playerVelocity.add( getSideVector().multiplyScalar( speedDelta ) );
 				}
 				
-				if ( playerOnFloor||playerOnOther||(is_impact_arr.indexOf(true) != -1) ) {
+				if ( playerOnFloor||playerOnOther||is_box_onfloor ) {
 					if ( keyStates[ 'Space' ] ) {
 						playerVelocity.y = 15;
 					}
@@ -673,7 +721,7 @@
 				gift_info_json['mesh'] = gift_mesh;
 				gift_info_json['velocity'] = new THREE.Vector3();
 				scene.add( gift_mesh );
-				console.log(gift.center);
+				
 				// gift_info_json['mesh'].postion.copy(gift.center);
 				gift_arr.push(gift_info_json);
 				
